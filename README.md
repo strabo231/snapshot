@@ -1,3 +1,5 @@
+[![Test SnapShot](https://github.com/strabo231/snapshot/actions/workflows/test.yml/badge.svg)](https://github.com/strabo231/snapshot/actions/workflows/test.yml)
+
 # SnapShot - System State Snapshot and Comparison Tool
 
 Know exactly what changed on your system! SnapShot captures system state and shows you precise before/after differences.
