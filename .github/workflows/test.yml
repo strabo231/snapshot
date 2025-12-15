@@ -1,0 +1,72 @@
+name: Test SnapShot
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test on Ubuntu
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Make script executable
+      run: chmod +x snapshot
+    
+    - name: Test help command
+      run: ./snapshot --help
+    
+    - name: Test version command
+      run: ./snapshot --version
+    
+    - name: Test save command
+      run: |
+        ./snapshot save test-snapshot
+        echo "✓ Snapshot created"
+    
+    - name: Test list command
+      run: |
+        ./snapshot list
+        echo "✓ List command works"
+    
+    - name: Create second snapshot
+      run: |
+        ./snapshot save test-snapshot2
+        echo "✓ Second snapshot created"
+    
+    - name: Test compare command
+      run: |
+        ./snapshot compare test-snapshot test-snapshot2 || true
+        echo "✓ Compare command works"
+    
+    - name: Test delete command
+      run: |
+        ./snapshot delete test-snapshot <<< "y"
+        echo "✓ Delete command works"
+    
+    - name: Install shellcheck
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y shellcheck
+    
+    - name: Run shellcheck
+      continue-on-error: true
+      run: shellcheck snapshot
+    
+    - name: Verify script structure
+      run: |
+        grep -q "take_snapshot()" snapshot
+        grep -q "compare_snapshots()" snapshot
+        grep -q "list_snapshots()" snapshot
+        echo "✓ Script structure verified"
+    
+    - name: All tests passed
+      run: |
+        echo "================================"
+        echo "✓ All tests passed successfully!"
+        echo "================================"

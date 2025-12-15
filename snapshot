@@ -1,0 +1,333 @@
+#!/bin/bash
+
+# SnapShot - System State Snapshot and Comparison Tool
+# Version: 1.0.0
+
+VERSION="1.0.0"
+SCRIPT_NAME="snapshot"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+print_success() { echo -e "${GREEN}✓${NC} $1"; }
+print_error() { echo -e "${RED}✗${NC} $1"; }
+print_info() { echo -e "${BLUE}ℹ${NC} $1"; }
+print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
+print_header() { echo -e "${CYAN}${1}${NC}"; }
+
+SNAPSHOT_DIR="$HOME/.snapshots"
+mkdir -p "$SNAPSHOT_DIR"
+
+show_usage() {
+    cat << EOF
+${BLUE}SnapShot${NC} - System State Snapshot and Comparison Tool v${VERSION}
+
+${YELLOW}Usage:${NC}
+    $SCRIPT_NAME <command> [options]
+
+${YELLOW}Commands:${NC}
+    save <name>              Take a snapshot
+    list                     List all snapshots
+    compare <snap1> <snap2>  Compare two snapshots
+    delete <name>            Delete a snapshot
+
+${YELLOW}Examples:${NC}
+    $SCRIPT_NAME save before-upgrade
+    $SCRIPT_NAME save after-upgrade
+    $SCRIPT_NAME compare before-upgrade after-upgrade
+
+${YELLOW}What Gets Captured:${NC}
+    • Installed packages
+    • Running services
+    • Listening ports
+    • Disk usage
+    • Kernel version
+    • User accounts
+
+EOF
+}
+
+show_version() {
+    echo "$SCRIPT_NAME version $VERSION"
+}
+
+take_snapshot() {
+    local name="$1"
+    
+    if [ -z "$name" ]; then
+        print_error "Please provide a snapshot name"
+        return 1
+    fi
+    
+    name=$(echo "$name" | tr ' ' '-' | tr -cd '[:alnum:]-_')
+    local snapshot_file="$SNAPSHOT_DIR/${name}.snapshot"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    if [ -f "$snapshot_file" ]; then
+        print_warning "Snapshot '$name' already exists"
+        read -p "Overwrite? (y/N) " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            return 0
+        fi
+    fi
+    
+    print_header "═══════════════════════════════════════════════════════════════"
+    print_header "              TAKING SYSTEM SNAPSHOT: $name"
+    print_header "═══════════════════════════════════════════════════════════════"
+    echo ""
+    
+    > "$snapshot_file"
+    
+    echo "[METADATA]" >> "$snapshot_file"
+    echo "name=$name" >> "$snapshot_file"
+    echo "timestamp=$timestamp" >> "$snapshot_file"
+    echo "hostname=$(hostname)" >> "$snapshot_file"
+    echo "" >> "$snapshot_file"
+    
+    print_info "Capturing system information..."
+    echo "[SYSTEM]" >> "$snapshot_file"
+    echo "kernel=$(uname -r)" >> "$snapshot_file"
+    echo "os=$(lsb_release -d 2>/dev/null | cut -f2 || echo "unknown")" >> "$snapshot_file"
+    echo "" >> "$snapshot_file"
+    
+    print_info "Capturing installed packages..."
+    echo "[PACKAGES]" >> "$snapshot_file"
+    if command -v dpkg &> /dev/null; then
+        dpkg -l | grep '^ii' | awk '{print $2}' >> "$snapshot_file"
+    elif command -v rpm &> /dev/null; then
+        rpm -qa | sort >> "$snapshot_file"
+    fi
+    echo "" >> "$snapshot_file"
+    
+    print_info "Capturing running services..."
+    echo "[SERVICES]" >> "$snapshot_file"
+    if command -v systemctl &> /dev/null; then
+        systemctl list-units --type=service --state=running --no-pager --no-legend | awk '{print $1}' >> "$snapshot_file"
+    fi
+    echo "" >> "$snapshot_file"
+    
+    print_info "Capturing listening ports..."
+    echo "[PORTS]" >> "$snapshot_file"
+    if command -v ss &> /dev/null; then
+        ss -tuln 2>/dev/null | grep LISTEN | awk '{print $5}' | sort -u >> "$snapshot_file"
+    fi
+    echo "" >> "$snapshot_file"
+    
+    print_info "Capturing disk usage..."
+    echo "[DISK]" >> "$snapshot_file"
+    df -h | grep -v tmpfs >> "$snapshot_file"
+    echo "" >> "$snapshot_file"
+    
+    print_info "Capturing user accounts..."
+    echo "[USERS]" >> "$snapshot_file"
+    cut -d: -f1 /etc/passwd >> "$snapshot_file"
+    echo "" >> "$snapshot_file"
+    
+    echo ""
+    print_header "═══════════════════════════════════════════════════════════════"
+    print_success "Snapshot '$name' saved"
+    print_info "Location: $snapshot_file"
+    print_header "═══════════════════════════════════════════════════════════════"
+    echo ""
+}
+
+list_snapshots() {
+    local snapshots=("$SNAPSHOT_DIR"/*.snapshot)
+    
+    if [ ! -f "${snapshots[0]}" ]; then
+        print_warning "No snapshots found"
+        echo ""
+        print_info "Create a snapshot with: $SCRIPT_NAME save <name>"
+        return
+    fi
+    
+    print_header "═══════════════════════════════════════════════════════════════"
+    print_header "                    SYSTEM SNAPSHOTS"
+    print_header "═══════════════════════════════════════════════════════════════"
+    echo ""
+    
+    for snapshot in "${snapshots[@]}"; do
+        if [ -f "$snapshot" ]; then
+            local name=$(grep "^name=" "$snapshot" | cut -d= -f2)
+            local timestamp=$(grep "^timestamp=" "$snapshot" | cut -d= -f2)
+            
+            echo -e "${CYAN}$name${NC}"
+            echo "  Taken: $timestamp"
+            echo ""
+        fi
+    done
+}
+
+compare_snapshots() {
+    local snap1="$1"
+    local snap2="$2"
+    
+    if [ -z "$snap1" ] || [ -z "$snap2" ]; then
+        print_error "Please specify two snapshots to compare"
+        return 1
+    fi
+    
+    local file1="$SNAPSHOT_DIR/${snap1}.snapshot"
+    local file2="$SNAPSHOT_DIR/${snap2}.snapshot"
+    
+    if [ ! -f "$file1" ]; then
+        print_error "Snapshot not found: $snap1"
+        return 1
+    fi
+    
+    if [ ! -f "$file2" ]; then
+        print_error "Snapshot not found: $snap2"
+        return 1
+    fi
+    
+    print_header "═══════════════════════════════════════════════════════════════"
+    print_header "            COMPARING: $snap1 → $snap2"
+    print_header "═══════════════════════════════════════════════════════════════"
+    echo ""
+    
+    # Compare packages
+    print_header "PACKAGES:"
+    local pkg1=$(mktemp)
+    local pkg2=$(mktemp)
+    sed -n '/\[PACKAGES\]/,/^\[/p' "$file1" | grep -v '^\[' | grep -v '^$' | sort > "$pkg1"
+    sed -n '/\[PACKAGES\]/,/^\[/p' "$file2" | grep -v '^\[' | grep -v '^$' | sort > "$pkg2"
+    
+    local added=$(comm -13 "$pkg1" "$pkg2" | wc -l)
+    local removed=$(comm -23 "$pkg1" "$pkg2" | wc -l)
+    
+    if [ $added -gt 0 ]; then
+        print_success "Added: $added packages"
+        comm -13 "$pkg1" "$pkg2" | head -10 | sed 's/^/  + /'
+        [ $added -gt 10 ] && echo "  ... and $((added - 10)) more"
+    fi
+    
+    if [ $removed -gt 0 ]; then
+        print_warning "Removed: $removed packages"
+        comm -23 "$pkg1" "$pkg2" | head -10 | sed 's/^/  - /'
+        [ $removed -gt 10 ] && echo "  ... and $((removed - 10)) more"
+    fi
+    
+    if [ $added -eq 0 ] && [ $removed -eq 0 ]; then
+        print_info "No package changes"
+    fi
+    echo ""
+    
+    # Compare services
+    print_header "SERVICES:"
+    local svc1=$(mktemp)
+    local svc2=$(mktemp)
+    sed -n '/\[SERVICES\]/,/^\[/p' "$file1" | grep -v '^\[' | grep -v '^$' | sort > "$svc1"
+    sed -n '/\[SERVICES\]/,/^\[/p' "$file2" | grep -v '^\[' | grep -v '^$' | sort > "$svc2"
+    
+    local svc_added=$(comm -13 "$svc1" "$svc2")
+    local svc_removed=$(comm -23 "$svc1" "$svc2")
+    
+    if [ -n "$svc_added" ]; then
+        print_success "New services running:"
+        echo "$svc_added" | sed 's/^/  + /'
+    fi
+    
+    if [ -n "$svc_removed" ]; then
+        print_warning "Services stopped:"
+        echo "$svc_removed" | sed 's/^/  - /'
+    fi
+    
+    if [ -z "$svc_added" ] && [ -z "$svc_removed" ]; then
+        print_info "No service changes"
+    fi
+    echo ""
+    
+    # Compare ports
+    print_header "PORTS:"
+    local port1=$(mktemp)
+    local port2=$(mktemp)
+    sed -n '/\[PORTS\]/,/^\[/p' "$file1" | grep -v '^\[' | grep -v '^$' | sort > "$port1"
+    sed -n '/\[PORTS\]/,/^\[/p' "$file2" | grep -v '^\[' | grep -v '^$' | sort > "$port2"
+    
+    local port_added=$(comm -13 "$port1" "$port2")
+    local port_removed=$(comm -23 "$port1" "$port2")
+    
+    if [ -n "$port_added" ]; then
+        print_success "New ports listening:"
+        echo "$port_added" | sed 's/^/  + /'
+    fi
+    
+    if [ -n "$port_removed" ]; then
+        print_warning "Ports no longer listening:"
+        echo "$port_removed" | sed 's/^/  - /'
+    fi
+    
+    if [ -z "$port_added" ] && [ -z "$port_removed" ]; then
+        print_info "No port changes"
+    fi
+    echo ""
+    
+    rm -f "$pkg1" "$pkg2" "$svc1" "$svc2" "$port1" "$port2"
+    
+    print_header "═══════════════════════════════════════════════════════════════"
+}
+
+delete_snapshot() {
+    local name="$1"
+    
+    if [ -z "$name" ]; then
+        print_error "Please specify snapshot name"
+        return 1
+    fi
+    
+    local snapshot_file="$SNAPSHOT_DIR/${name}.snapshot"
+    
+    if [ ! -f "$snapshot_file" ]; then
+        print_error "Snapshot not found: $name"
+        return 1
+    fi
+    
+    read -p "Delete snapshot '$name'? (y/N) " -n 1 -r
+    echo ""
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        rm "$snapshot_file"
+        print_success "Snapshot deleted: $name"
+    fi
+}
+
+# Main
+if [ $# -eq 0 ]; then
+    show_usage
+    exit 0
+fi
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+    save)
+        take_snapshot "$@"
+        ;;
+    list|ls)
+        list_snapshots
+        ;;
+    compare|diff)
+        compare_snapshots "$@"
+        ;;
+    delete|rm)
+        delete_snapshot "$@"
+        ;;
+    -h|--help)
+        show_usage
+        ;;
+    -v|--version)
+        show_version
+        ;;
+    *)
+        print_error "Unknown command: $COMMAND"
+        echo "Use -h or --help for usage information"
+        exit 1
+        ;;
+esac

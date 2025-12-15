@@ -1,0 +1,18 @@
+# Test files
+test/
+tests/
+*.test
+
+# Snapshots (local testing)
+.snapshots/
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
