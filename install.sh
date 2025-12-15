@@ -5,7 +5,7 @@ set -e
 
 INSTALL_DIR="/usr/local/bin"
 SCRIPT_NAME="snapshot"
-REPO_URL="https://raw.githubusercontent.com/YOUR_USERNAME/snapshot/main/snapshot"
+REPO_URL="https://raw.githubusercontent.com/strabo231/snapshot/main/snapshot"
 
 echo "📸 SnapShot Installer"
 echo "===================="
